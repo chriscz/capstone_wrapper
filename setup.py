@@ -10,5 +10,6 @@ setup(
         author_email='chriscz93@gmail.com',
         license='Apache 2.0',
         packages=['capstone_wrapper'],
+        install_requires=['capstone'],
         zip_safe=False
 )
