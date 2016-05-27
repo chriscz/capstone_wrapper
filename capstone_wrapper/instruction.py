@@ -319,6 +319,7 @@ class read_from(object):
         reads = reads - ignore
         return len(reads) > 0
 
+read_from = read_from()
 
 # Some general instruction specific checks
 def is_jump(insn):
@@ -345,3 +346,6 @@ def mnemonic(insn):
 
 def opstring(insn):
     return insn.op_str
+
+def string(insn):
+    return str(insn)
