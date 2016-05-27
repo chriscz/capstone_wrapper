@@ -339,3 +339,9 @@ def is_return(insn):
     is_return = capstone.CS_GRP_IRET in insn.groups
     is_return = is_return or capstone.CS_GRP_RET in insn.groups
     return is_return
+
+def mnemonic(insn):
+    return insn.mnemonic
+
+def opstring(insn):
+    return insn.op_str
