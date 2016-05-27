@@ -11,6 +11,7 @@ from capstone import x86_const
 # Used to negate assertion functions
 RE_NOT = re.compile(r'((^not_)|(_not$)|(_not_))')
 
+
 # This library assumes that the AT & T is the syntax used
 # We try to accommodate intel by checking where necessary,
 # luckily capstone includes a reference to the disassembler on each instruction which allows us
@@ -154,6 +155,10 @@ class operands(object):
         return [insn.reg_name(_) for _ in registers]
 
     def canonically_ordered(self, insn):
+        """
+        Orders the operands in the AT&T style, thus
+        the form we use is insn needle, haystack
+        """
         if disassembler.is_syntax_att(insn):
             return list(insn.operands)
         elif disassembler.is_syntax_intel(insn):
@@ -256,12 +261,13 @@ class branch(object):
 branch = branch()
 
 
-class writes_to(object):
+class write_to(object):
     def memory(self, insn):
         # FIXME Assume for now that we write to memory if the last parameter is a memory operand
         ensure.is_capstone_insn(insn)
         ops = operands.canonically_ordered(insn)
 
+        # is the last operand a memory operand?
         is_memory = len(ops) > 0 and ops[-1].type == capstone.CS_OP_MEM
 
         if self.register(insn) and is_memory:
@@ -278,7 +284,40 @@ class writes_to(object):
         return len(writes) > 0
 
 
-writes_to = writes_to()
+write_to = write_to()
+
+
+class read_from(object):
+    def memory(self, insn):
+        ensure.is_capstone_insn(insn)
+        ops = operands.canonically_ordered(insn)
+
+        # XXX This is a very dubious assumption
+        # `All instructions that read from memory, have the address as leftmost operand`
+        # Rather consider the actual instruction encodings from the intel manual
+        # to fully understand which instructions actually read from memory.
+
+        if len(ops) == 0:
+            return False
+        else:
+            return ops[0].type == capstone.CS_OP_MEM
+
+    def register(self, insn, ignore=frozenset()):
+        """
+        Does this instruction read from a a register?
+
+        Parameters
+        ----------
+        insn: capstone.CsInsn
+            The assembly instruction
+
+        ignore: set
+            Which registers are we to ignore?
+        """
+        ensure.is_capstone_insn(insn)
+        reads = set(operands.registers_read(insn, as_strings=False))
+        reads = reads - ignore
+        return len(reads) > 0
 
 
 # Some general instruction specific checks
