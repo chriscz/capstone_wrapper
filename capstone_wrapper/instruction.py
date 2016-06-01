@@ -26,6 +26,21 @@ def _warn(message):
     print "[WARN] {}".format(message)
 
 
+class _matchers:
+    def startswith(self, what): lambda s: s.startswith(what)
+
+    def endswith(self, what): lambda s: s.endswith(what)
+
+    def contains(self, what): lambda s: s.contains(what)
+
+
+_matchers = _matchers()
+
+
+def any_yields(functions, value):
+    return any(f(value) for f in functions)
+
+
 def expect_capstone_at_least_version(expected):
     if isinstance(expected, tuple):
         expected = list(expected)
@@ -79,9 +94,6 @@ class disassembler(object):
         return obj.syntax == capstone.CS_OPT_SYNTAX_INTEL
 
 
-disassembler = disassembler()
-
-
 class ensure(object):
     """
     Several methods for sanity checks, used during development
@@ -128,9 +140,6 @@ class ensure(object):
         raise AttributeError("Field not found: " + str(item))
 
 
-ensure = ensure()
-
-
 # operand specific functions
 class operand(object):
     def is_memory(self, operand):
@@ -145,8 +154,34 @@ class operand(object):
     def as_immediate(self, operand):
         return operand.value.imm
 
+    def sib_registers(self, csinsn, operand, as_strings=False):
+        regs = set()
+        if self.is_memory(operand):
+            regs.add(operand.value.mem.base)
+            regs.add(operand.value.mem.index)
 
-operand = operand()
+        regs = regs - set([None])  # Remove None if one of the values were None
+
+        if as_strings:
+            regs = set([register.to_string(csinsn, operand)])
+
+        return regs
+
+    def registers(self, csinsn, operand, as_string=True):
+        operand = ensure.not_none(operand)
+        regs = set()
+        if self.is_memory(operand):
+            regs.add(operand.value.mem.base)
+            regs.add(operand.value.mem.index)
+        elif self.is_register(operand):
+            regs.add(operand.value.reg)
+
+        regs = regs - set([None])  # Remove None if one of the values were None
+
+        if as_string:
+            regs = set([register.to_string(csinsn, operand)])
+
+        return regs
 
 
 # set of functions that operate over all the operands of an instruction
@@ -219,18 +254,12 @@ class operands(object):
             return [insn.reg_name(_) for _ in write]
 
 
-operands = operands()
-
-
 class fetch(object):
     def only_operand(self, insn):
         ensure.is_capstone_insn(insn)
         if ensure.not_none(insn.op_count) == 1:
             raise ValueError("op count for instruction `{}` != 1".format(insn))
         return insn.operands[0]
-
-
-fetch = fetch()
 
 
 # FIXME add support for loopnz/ne and loopz/e
@@ -258,17 +287,25 @@ class branch(object):
         return operand.is_memory(fetch.only_operand(insn)) or operand.is_register(fetch.only_operand(insn))
 
 
-branch = branch()
-
-
 class write_to(object):
+    _memory_mnemonics = (_matchers.startswith('push'),)
+    _not_memory_mnemonics = (_matchers.startswith('nop'),
+                             _matchers.startswith('jmp')
+                             )
+
     def memory(self, insn):
         # FIXME Assume for now that we write to memory if the last parameter is a memory operand
         ensure.is_capstone_insn(insn)
         ops = operands.canonically_ordered(insn)
 
+        is_memop = lambda: len(ops) > 0 and ops[-1].type == capstone.CS_OP_MEM
+        is_excluded = lambda: any_yields(self._not_memory_mnemonics, mnemonic(insn))
+        is_included = lambda: any_yields(self._memory_mnemonics, mnemonic(insn))
+
         # is the last operand a memory operand?
-        is_memory = len(ops) > 0 and ops[-1].type == capstone.CS_OP_MEM
+        # ASS. It's more likely that a write to memory will have at least two arguments
+        # This is obviously not true for all instructions, consider PUSH %rax
+        is_memory = is_included() or (is_memop() and not is_excluded())
 
         if self.register(insn) and is_memory:
             _warn("INSN[{} {}] writes to memory and registers({})".format(
@@ -282,9 +319,6 @@ class write_to(object):
         writes = set(operands.registers_write(insn, as_strings=False))
         writes = writes - ignore
         return len(writes) > 0
-
-
-write_to = write_to()
 
 
 class read_from(object):
@@ -302,7 +336,7 @@ class read_from(object):
         else:
             return ops[0].type == capstone.CS_OP_MEM
 
-    def register(self, insn, ignore=frozenset()):
+    def register(self, insn, ignore=frozenset(), ignore_sib=False):
         """
         Does this instruction read from a a register?
 
@@ -315,11 +349,23 @@ class read_from(object):
             Which registers are we to ignore?
         """
         ensure.is_capstone_insn(insn)
+
+        if ignore_sib:
+            ops = operands.canonically_ordered(insn)
+            ignore = set(ignore)
+            for o in ops:
+                ignore.update(operand.sib_registers(insn, o))
+
         reads = set(operands.registers_read(insn, as_strings=False))
         reads = reads - ignore
         return len(reads) > 0
 
-read_from = read_from()
+
+class register(object):
+    def to_string(self, csinsn, register):
+        ensure.is_capstone_insn(csinsn)
+        return csinsn.reg_name(register)
+
 
 # Some general instruction specific checks
 def is_jump(insn):
@@ -341,11 +387,31 @@ def is_return(insn):
     is_return = is_return or capstone.CS_GRP_RET in insn.groups
     return is_return
 
+
 def mnemonic(insn):
     return insn.mnemonic
+
 
 def opstring(insn):
     return insn.op_str
 
+
 def string(insn):
     return str(insn)
+
+
+# dynamic Instantiation of all the classes
+_classes = [
+    disassembler,
+    ensure,
+    operand,
+    operands,
+    fetch,
+    branch,
+    write_to,
+    read_from,
+    register
+]
+
+for cls in _classes:
+    globals()[cls.__name__] = cls()
