@@ -27,11 +27,11 @@ def _warn(message):
 
 
 class _matchers:
-    def startswith(self, what): lambda s: s.startswith(what)
+    def startswith(self, what): return lambda s: s.startswith(what)
 
-    def endswith(self, what): lambda s: s.endswith(what)
+    def endswith(self, what): return lambda s: s.endswith(what)
 
-    def contains(self, what): lambda s: s.contains(what)
+    def contains(self, what): return lambda s: s.contains(what)
 
 
 _matchers = _matchers()
@@ -189,15 +189,20 @@ class operands(object):
     def _register_iterable_to_string(self, insn, registers):
         return [insn.reg_name(_) for _ in registers]
 
-    def canonically_ordered(self, insn):
+    def canonically_ordered(self, insn, as_strings=False):
         """
         Orders the operands in the AT&T style, thus
         the form we use is insn needle, haystack
         """
         if disassembler.is_syntax_att(insn):
-            return list(insn.operands)
+            ops = list(insn.operands)
         elif disassembler.is_syntax_intel(insn):
-            return list(reversed(insn.operands))
+            ops = list(reversed(insn.operands))
+
+        if as_strings:
+            ops = [_ for _ in ops]
+        return ops
+
 
     def registers_read_implicit(self, insn):
         ensure.is_capstone_insn(insn)
