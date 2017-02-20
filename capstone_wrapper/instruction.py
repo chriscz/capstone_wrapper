@@ -1,6 +1,16 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
-    Library that implements a more functional way of accessing the fields capstone's
-    CsInsn instructions.
+Provides a more functional way of accessing the fields from Capstone's
+CsInsn instructions.
+
+NOTES
+-----
+This library assumes that the AT & T is the syntax used.
+We try to accommodate Intel syntax by checking where necessary. Fortunately,
+capstone includes a reference to the disassembler on each instruction, thus allowing
+to check the syntax in use, at runtime.
 """
 
 import capstone
@@ -8,39 +18,12 @@ import re
 from capstone import x86
 from capstone import x86_const
 
+from functool import wraps
+
 # Used to negate assertion functions
 RE_NOT = re.compile(r'((^not_)|(_not$)|(_not_))')
 
-
-# This library assumes that the AT & T is the syntax used
-# We try to accommodate intel by checking where necessary,
-# luckily capstone includes a reference to the disassembler on each instruction which allows us
-# to check the syntax at runtime
-
-# Assertion definitions
-def assert_single_operand(insn):
-    assert len(insn.operands) == 1
-
-
-def _warn(message):
-    print "[WARN] {}".format(message)
-
-
-class _matchers:
-    def startswith(self, what): return lambda s: s.startswith(what)
-
-    def endswith(self, what): return lambda s: s.endswith(what)
-
-    def contains(self, what): return lambda s: s.contains(what)
-
-
-_matchers = _matchers()
-
-
-def any_yields(functions, value):
-    return any(f(value) for f in functions)
-
-
+# --- helper functions
 def expect_capstone_at_least_version(expected):
     if isinstance(expected, tuple):
         expected = list(expected)
@@ -58,17 +41,44 @@ def expect_capstone_at_least_version(expected):
         raise AssertionError("Capstone version {} < {}".format(actual, expected))
 
 
-def _not_assert(function):
-    """Flip a function that raises an assert assert"""
+def _warn(message):
+    print "[WARN] {}".format(message)
 
-    def _(*args, **kwargs):
+# --- library functions
+
+# Assertion definitions
+def assert_single_operand(insn):
+    assert len(insn.operands) == 1
+
+class _matchers:
+    """
+    Container for higher-order functions that build string matching functions.
+    """
+    def startswith(self, what): return lambda s: s.startswith(what)
+
+    def endswith(self, what): return lambda s: s.endswith(what)
+
+    def contains(self, what): return lambda s: s.contains(what)
+
+
+_matchers = _matchers()
+
+
+def any_yields(functions, value):
+    """Do any of the functions resolve to true when applied to `value`?"""
+    return any(f(value) for f in functions)
+
+
+def _not_assert(function):
+    """Flip a function that raises an assertion"""
+    @wraps(function)
+    def flipped(*args, **kwargs):
         try:
             function(*args, **kwargs)
             raise AssertionError()
         except AssertionError:
             return
-
-    return _
+    return flipped
 
 
 class disassembler(object):
@@ -82,7 +92,7 @@ class disassembler(object):
             return self.ensure_disassembler(obj._cs)
         else:
             raise ValueError(
-                    "Expected either instruction or disassembler instance as parameter, but got: {}".format(repr(obj))
+                "Expected either instruction or disassembler instance as parameter, but got: {}".format(repr(obj))
             )
 
     def is_syntax_att(self, obj):
@@ -127,10 +137,12 @@ class ensure(object):
     def __getattr__(self, item):
         match = RE_NOT.match(item)
         if match:
-            """Allows for negating assertions"""
+            # support for negating assertion functions
             if match.group(1) == '_not_':
+                # not in the middle as in `is_not_memory`
                 func = RE_NOT.sub('_', item)
             else:
+                # not at the beginning or end as in `not_is_memory` or `is_memory_not` 
                 func = RE_NOT.sub('', item)
             # check whether the function exists
             if not hasattr(self, func):
@@ -202,7 +214,6 @@ class operands(object):
         if as_strings:
             ops = [_ for _ in ops]
         return ops
-
 
     def registers_read_implicit(self, insn):
         ensure.is_capstone_insn(insn)
@@ -293,10 +304,13 @@ class branch(object):
 
 
 class write_to(object):
-    _memory_mnemonics = (_matchers.startswith('push'),)
-    _not_memory_mnemonics = (_matchers.startswith('nop'),
-                             _matchers.startswith('jmp')
-                             )
+    _memory_mnemonics = (
+        _matchers.startswith('push'),
+    )
+    _not_memory_mnemonics = (
+        _matchers.startswith('nop'),
+        _matchers.startswith('jmp'),
+    )
 
     def memory(self, insn):
         # FIXME Assume for now that we write to memory if the last parameter is a memory operand
@@ -331,9 +345,11 @@ class read_from(object):
         ensure.is_capstone_insn(insn)
         ops = operands.canonically_ordered(insn)
 
-        # XXX This is a very dubious assumption
-        # `All instructions that read from memory, have the address as leftmost operand`
-        # Rather consider the actual instruction encodings from the intel manual
+        # XXX This makes the dubious assumption:
+        #     All instructions that read from memory, 
+        #     have the address as leftmost operand
+        #
+        # We should rather consider the actual instruction encodings from the intel manual
         # to fully understand which instructions actually read from memory.
 
         if len(ops) == 0:
