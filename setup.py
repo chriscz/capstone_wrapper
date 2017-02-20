@@ -1,6 +1,6 @@
 from setuptools import setup
 
-__version__ = '0.2.0'
+__version__ = '0.2.1'
 setup(
         name='capstone_wrapper',
         version=__version__,
@@ -10,6 +10,6 @@ setup(
         author_email='chriscz93@gmail.com',
         license='Mozilla Public License 2.0 (MPL 2.0)',
         packages=['capstone_wrapper'],
-        install_requires=['capstone >4.0.0, < 4.1'],
+#        install_requires=['capstone >= 3.0.3'],
         zip_safe=False
 )
