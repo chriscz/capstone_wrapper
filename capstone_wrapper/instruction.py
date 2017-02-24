@@ -18,7 +18,7 @@ import re
 from capstone import x86
 from capstone import x86_const
 
-from functool import wraps
+from functools import wraps
 
 # Used to negate assertion functions
 RE_NOT = re.compile(r'((^not_)|(_not$)|(_not_))')
